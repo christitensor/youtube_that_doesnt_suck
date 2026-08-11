@@ -130,10 +130,11 @@ export async function getDirectStreamUrl(videoId: string): Promise<string> {
       "--get-url",
       "--no-warnings",
       // Cloud/datacenter IPs (Vercel included) get YouTube's "confirm you're
-      // not a bot" wall on the default web client - the android client skips
-      // that check entirely, with web as a fallback if android's blocked too.
+      // not a bot" wall on most clients now (web, android, ios, tv all
+      // tested blocked) - tv_embedded was the one that got through in
+      // testing, with mweb as a fallback.
       "--extractor-args",
-      "youtube:player_client=android,web",
+      "youtube:player_client=tv_embedded,mweb",
     ],
     40_000,
     1
