@@ -16,6 +16,7 @@ export type VideoRow = {
   audio_file_path: string | null;
   audio_file_bytes: number | null;
   watched: 0 | 1;
+  resume_seconds: number;
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -37,7 +38,10 @@ export const api = {
   downloadVideo: (id: string) => req(`/api/videos/${id}/download`, { method: "POST" }),
   downloadAudio: (id: string) => req(`/api/videos/${id}/download-audio`, { method: "POST" }),
   downloadAll: () => req<{ queued: number; remaining: number }>("/api/download-all", { method: "POST" }),
-  markWatched: (id: string) => req(`/api/videos/${id}/watched`, { method: "POST" }),
+  saveProgress: (id: string, resumeSeconds: number) =>
+    req(`/api/videos/${id}/watched`, { method: "POST", body: JSON.stringify({ resumeSeconds }) }),
+  markCompleted: (id: string) =>
+    req(`/api/videos/${id}/watched`, { method: "POST", body: JSON.stringify({ completed: true }) }),
   feedToken: () => req<{ token: string }>("/api/feed-token"),
 };
 

@@ -28,6 +28,7 @@ export type VideoRecord = {
   audio_file_bytes: number | null;
 
   watched: 0 | 1;
+  resume_seconds: number;
   removed_from_source: 0 | 1;
 };
 

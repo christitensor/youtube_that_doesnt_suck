@@ -60,6 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           audio_file_path: null,
           audio_file_bytes: null,
           watched: 0,
+          resume_seconds: 0,
           removed_from_source: 0,
         };
         db.videos[item.videoId] = record;
