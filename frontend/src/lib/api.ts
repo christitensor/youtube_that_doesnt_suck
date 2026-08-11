@@ -42,7 +42,18 @@ export const api = {
     req(`/api/videos/${id}/watched`, { method: "POST", body: JSON.stringify({ resumeSeconds }) }),
   markCompleted: (id: string) =>
     req(`/api/videos/${id}/watched`, { method: "POST", body: JSON.stringify({ completed: true }) }),
-  feedToken: () => req<{ token: string }>("/api/feed-token"),
+  feedToken: () => req<{ token: string; cronSecret: string }>("/api/feed-token"),
+  uploadCookies: async (cookiesText: string, cronSecret: string): Promise<void> => {
+    const res = await fetch("/api/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", "X-Kind": "cookies", Authorization: `Bearer ${cronSecret}` },
+      body: cookiesText,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${body}`);
+    }
+  },
 };
 
 /** Builds the private podcast RSS feed URL from the current page origin —

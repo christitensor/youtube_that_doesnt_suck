@@ -6,10 +6,12 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import { readCookiesText } from "./cookies.js";
 
 const YTDLP_PATH = "/tmp/yt-dlp";
 const YTDLP_DOWNLOAD_URL =
   "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux";
+const COOKIES_PATH = "/tmp/cookies.txt";
 
 let ensurePromise: Promise<void> | null = null;
 
@@ -27,6 +29,27 @@ async function ensureYtDlp(): Promise<void> {
     })();
   }
   await ensurePromise;
+}
+
+let cookiesPromise: Promise<boolean> | null = null;
+
+/** Writes /tmp/cookies.txt from the stored Blob cookies (if any) once per
+ * cold start. Returns whether a cookies file is available to pass to yt-dlp. */
+async function ensureCookiesFile(): Promise<boolean> {
+  if (fs.existsSync(COOKIES_PATH)) return true;
+  if (!cookiesPromise) {
+    cookiesPromise = (async () => {
+      const text = await readCookiesText();
+      if (!text) return false;
+      await fsp.writeFile(COOKIES_PATH, text, { mode: 0o600 });
+      return true;
+    })();
+  }
+  return cookiesPromise;
+}
+
+async function cookieArgs(): Promise<string[]> {
+  return (await ensureCookiesFile()) ? ["--cookies", COOKIES_PATH] : [];
 }
 
 function run(args: string[], timeoutMs = 40_000): Promise<{ stdout: string; stderr: string }> {
@@ -96,6 +119,7 @@ export async function listPlaylist(playlistId: string): Promise<FlatPlaylistItem
       "--ignore-errors",
       "--print",
       `%(id)s${SEP}%(title)s${SEP}%(duration)s${SEP}%(channel)s${SEP}%(uploader)s`,
+      ...(await cookieArgs()),
     ],
     55_000,
     1
@@ -130,11 +154,14 @@ export async function getDirectStreamUrl(videoId: string): Promise<string> {
       "--get-url",
       "--no-warnings",
       // Cloud/datacenter IPs (Vercel included) get YouTube's "confirm you're
-      // not a bot" wall on most clients now (web, android, ios, tv all
-      // tested blocked) - tv_embedded was the one that got through in
-      // testing, with mweb as a fallback.
+      // not a bot" wall on most clients now, even with player-client
+      // tricks (web, android, ios, tv, tv_embedded, mweb all tested
+      // blocked from Vercel's actual production IPs). Cookies from a real
+      // signed-in browser session (uploaded via Settings) are the reliable
+      // fix; player_client is kept as a harmless secondary hint.
       "--extractor-args",
       "youtube:player_client=tv_embedded,mweb",
+      ...(await cookieArgs()),
     ],
     40_000,
     1

@@ -5,21 +5,29 @@
 // resulting file; we never block a Function on the download itself.
 import { Sandbox } from "@vercel/sandbox";
 import { CRON_SECRET, publicBaseUrl } from "./env.js";
+import { readCookiesText } from "./cookies.js";
 
 export type JobKind = "video" | "audio";
 
 const SANDBOX_TIMEOUT_MS = 25 * 60 * 1000; // 25 minutes, plenty for one video
 
-function buildScript(kind: JobKind, videoId: string, ingestUrl: string): string {
+function buildScript(kind: JobKind, videoId: string, ingestUrl: string, cookiesText: string | null): string {
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
   // Cloud/datacenter IPs (Sandbox included) get YouTube's "confirm you're
-  // not a bot" wall on most clients now - tv_embedded was the one that got
-  // through in testing, with mweb as a fallback.
-  const clientArgs = `--extractor-args "youtube:player_client=tv_embedded,mweb"`;
+  // not a bot" wall on almost every request now - player_client tricks alone
+  // don't reliably get through from real Vercel/Sandbox IPs, so cookies from
+  // a real signed-in session (uploaded via Settings) are the primary fix,
+  // with player_client kept as a harmless secondary hint.
+  const cookiesArg = cookiesText ? `--cookies /tmp/cookies.txt` : "";
+  const clientArgs = `--extractor-args "youtube:player_client=tv_embedded,mweb" ${cookiesArg}`;
   const ytdlpArgs =
     kind === "video"
       ? `-f "best[ext=mp4]/best" -o "out.%(ext)s" --no-playlist --no-warnings ${clientArgs}`
       : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${clientArgs}`;
+
+  const cookiesSetup = cookiesText
+    ? `cat > /tmp/cookies.txt <<'YTDLP_COOKIES_EOF'\n${cookiesText}\nYTDLP_COOKIES_EOF\nchmod 600 /tmp/cookies.txt\n`
+    : "";
 
   const ffmpegSetup =
     kind === "audio"
@@ -43,6 +51,7 @@ set -u
 cd /tmp
 curl -sL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux" || { ${fail}; exit 1; }
 chmod +x /tmp/yt-dlp
+${cookiesSetup}
 ${ffmpegSetup}
 mkdir -p /tmp/work && cd /tmp/work
 /tmp/yt-dlp ${ytdlpArgs} "${ytUrl}"
@@ -63,7 +72,8 @@ curl -sS -X POST "${ingestUrl}" \\
  * returns as soon as it's launched (does not wait for the download). */
 export async function kickoffDownloadJob(videoId: string, kind: JobKind, reqHost?: string): Promise<void> {
   const ingestUrl = `${publicBaseUrl(reqHost)}/api/ingest`;
-  const script = buildScript(kind, videoId, ingestUrl);
+  const cookiesText = await readCookiesText();
+  const script = buildScript(kind, videoId, ingestUrl, cookiesText);
 
   // No `runtime`/`image` specified — uses Vercel's default
   // `vercel/sandbox/universal` image, which has more general-purpose
