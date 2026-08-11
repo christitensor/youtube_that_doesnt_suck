@@ -1,0 +1,19 @@
+{
+  "name": "watch-later-vercel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Root package for Vercel Functions (/api). The installable PWA lives in /frontend with its own package.json.",
+  "type": "module",
+  "dependencies": {
+    "@vercel/blob": "^2.8.0",
+    "@vercel/sandbox": "^3.0.0",
+    "raw-body": "^3.0.0",
+    "rss": "^1.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.5",
+    "@types/rss": "^0.0.32",
+    "@vercel/node": "^5.9.8",
+    "typescript": "^5.6.2"
+  }
+}

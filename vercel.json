@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "installCommand": "npm install",
+  "functions": {
+    "api/sync.ts": { "maxDuration": 60 },
+    "api/videos.ts": { "maxDuration": 15 },
+    "api/videos/[id]/stream-url.ts": { "maxDuration": 45 },
+    "api/videos/[id]/download.ts": { "maxDuration": 30 },
+    "api/videos/[id]/download-audio.ts": { "maxDuration": 30 },
+    "api/download-all.ts": { "maxDuration": 45 },
+    "api/ingest.ts": { "maxDuration": 60 },
+    "api/feed/[token].xml.ts": { "maxDuration": 15 },
+    "api/feed-token.ts": { "maxDuration": 10 },
+    "api/videos/[id]/watched.ts": { "maxDuration": 10 },
+    "api/health.ts": { "maxDuration": 10 }
+  }
+}

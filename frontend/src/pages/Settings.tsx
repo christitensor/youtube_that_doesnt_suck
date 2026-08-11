@@ -1,51 +1,41 @@
-import { useState } from "react";
-import { api, getBackendUrl, setBackendUrl } from "../lib/api";
+import { useEffect, useState } from "react";
+import { api, feedUrl } from "../lib/api";
 
 export function Settings() {
-  const [url, setUrl] = useState(getBackendUrl());
-  const [feedToken, setFeedToken] = useState(localStorage.getItem("ytdns_feed_token") ?? "");
-  const [saved, setSaved] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  function handleSave() {
-    setBackendUrl(url);
-    localStorage.setItem("ytdns_feed_token", feedToken);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-  }
+  useEffect(() => {
+    api
+      .feedToken()
+      .then((res) => setToken(res.token))
+      .catch((err) => setError(err.message));
+  }, []);
 
-  const feedUrl = feedToken ? api.feedUrl(feedToken) : null;
+  const url = token ? feedUrl(token) : null;
 
   return (
     <div className="settings">
-      <label>
-        Backend URL
-        <input
-          type="url"
-          placeholder="https://your-app.fly.dev"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
-      </label>
+      <p className="hint">
+        This app runs entirely from this one address — there's no backend URL to configure.
+      </p>
 
-      <label>
-        Podcast feed token
-        <input
-          type="text"
-          placeholder="the FEED_TOKEN you set in the backend .env"
-          value={feedToken}
-          onChange={(e) => setFeedToken(e.target.value)}
-        />
-      </label>
+      {error && <p className="error">{error}</p>}
 
-      <button onClick={handleSave} className="primary">
-        {saved ? "Saved ✓" : "Save"}
-      </button>
-
-      {feedUrl && (
+      {url && (
         <div className="feed-box">
           <p>Your private podcast RSS feed — add this URL in Apple Podcasts, Overcast, or any podcast app:</p>
-          <code>{feedUrl}</code>
-          <button onClick={() => navigator.clipboard.writeText(feedUrl)}>Copy</button>
+          <code>{url}</code>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(url);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }}
+          >
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
         </div>
       )}
 

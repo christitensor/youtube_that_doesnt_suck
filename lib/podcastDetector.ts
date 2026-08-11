@@ -1,9 +1,5 @@
+// Ported unchanged from backend/src/services/podcastDetector.ts
 export type PodcastClassification = { isPodcast: boolean; reason: string };
-
-const TITLE_KEYWORDS = [
-  "podcast", "episode", "ep.", "ep #", "#ep", "interview", "conversation with",
-  "in conversation", "the ", // used only combined with "show"/"podcast" below
-];
 
 const STRONG_TITLE_KEYWORDS = ["podcast", "episode", "ep.", "interview"];
 const CHANNEL_KEYWORDS = ["podcast", "radio", "show"];

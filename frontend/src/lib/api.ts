@@ -10,26 +10,16 @@ export type VideoRow = {
   is_podcast: 0 | 1;
   podcast_reason: string | null;
   video_download_status: "none" | "downloading" | "ready" | "failed";
+  video_file_url: string | null;
   video_file_bytes: number | null;
   audio_download_status: "none" | "downloading" | "ready" | "failed";
+  audio_file_url: string | null;
   audio_file_bytes: number | null;
   watched: 0 | 1;
 };
 
-const BASE_URL_KEY = "ytdns_backend_url";
-
-export function getBackendUrl(): string {
-  return localStorage.getItem(BASE_URL_KEY) ?? "";
-}
-
-export function setBackendUrl(url: string) {
-  localStorage.setItem(BASE_URL_KEY, url.replace(/\/$/, ""));
-}
-
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const base = getBackendUrl();
-  if (!base) throw new Error("Set your backend URL in Settings first.");
-  const res = await fetch(`${base}${path}`, {
+  const res = await fetch(path, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
@@ -42,13 +32,18 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listVideos: () => req<VideoRow[]>("/api/videos"),
-  sync: () => req<{ added: number; total: number }>("/api/sync", { method: "POST" }),
+  sync: () => req<{ added: number; total: number }>("/api/sync"),
   streamUrl: (id: string) => req<{ url: string }>(`/api/videos/${id}/stream-url`),
   downloadVideo: (id: string) => req(`/api/videos/${id}/download`, { method: "POST" }),
   downloadAudio: (id: string) => req(`/api/videos/${id}/download-audio`, { method: "POST" }),
-  downloadAll: () => req<{ queued: number }>("/api/download-all", { method: "POST" }),
+  downloadAll: () => req<{ queued: number; remaining: number }>("/api/download-all", { method: "POST" }),
   markWatched: (id: string) => req(`/api/videos/${id}/watched`, { method: "POST" }),
-  videoFileUrl: (id: string) => `${getBackendUrl()}/api/videos/${id}/video-file`,
-  audioFileUrl: (id: string) => `${getBackendUrl()}/api/videos/${id}/audio-file`,
-  feedUrl: (token: string) => `${getBackendUrl()}/feed/${token}.xml`,
+  feedToken: () => req<{ token: string }>("/api/feed-token"),
 };
+
+/** Builds the private podcast RSS feed URL from the current page origin —
+ * this app is served from a single Vercel deployment, so there's no
+ * separate "backend URL" to configure anymore. */
+export function feedUrl(token: string): string {
+  return `${window.location.origin}/api/feed/${token}.xml`;
+}
