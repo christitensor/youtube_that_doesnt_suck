@@ -12,10 +12,14 @@ const SANDBOX_TIMEOUT_MS = 25 * 60 * 1000; // 25 minutes, plenty for one video
 
 function buildScript(kind: JobKind, videoId: string, ingestUrl: string): string {
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  // Cloud/datacenter IPs (Sandbox included) get YouTube's "confirm you're
+  // not a bot" wall on the default web client - android skips that check,
+  // with web as a fallback if android's blocked too.
+  const clientArgs = `--extractor-args "youtube:player_client=android,web"`;
   const ytdlpArgs =
     kind === "video"
-      ? `-f "best[ext=mp4]/best" -o "out.%(ext)s" --no-playlist --no-warnings`
-      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings`;
+      ? `-f "best[ext=mp4]/best" -o "out.%(ext)s" --no-playlist --no-warnings ${clientArgs}`
+      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${clientArgs}`;
 
   const ffmpegSetup =
     kind === "audio"

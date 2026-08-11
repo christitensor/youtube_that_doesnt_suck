@@ -123,7 +123,18 @@ export async function listPlaylist(playlistId: string): Promise<FlatPlaylistItem
 export async function getDirectStreamUrl(videoId: string): Promise<string> {
   await ensureYtDlp();
   const stdout = await runWithRetry(
-    [videoUrl(videoId), "-f", "best[ext=mp4]/best", "--get-url", "--no-warnings"],
+    [
+      videoUrl(videoId),
+      "-f",
+      "best[ext=mp4]/best",
+      "--get-url",
+      "--no-warnings",
+      // Cloud/datacenter IPs (Vercel included) get YouTube's "confirm you're
+      // not a bot" wall on the default web client - the android client skips
+      // that check entirely, with web as a fallback if android's blocked too.
+      "--extractor-args",
+      "youtube:player_client=android,web",
+    ],
     40_000,
     1
   );
