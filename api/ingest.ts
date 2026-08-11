@@ -70,8 +70,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const ext = filename.includes(".") ? filename.split(".").pop() : kind === "video" ? "mp4" : "mp3";
   const pathname = `media/${kind}/${videoId}.${ext}`;
 
-  const blob = await put(pathname, body, {
-    access: "public",
+  await put(pathname, body, {
+    access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: kind === "video" ? "video/mp4" : "audio/mpeg",
@@ -80,9 +80,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   await updateVideo(
     videoId,
     kind === "video"
-      ? { video_download_status: "ready", video_file_url: blob.url, video_file_bytes: body.length }
-      : { audio_download_status: "ready", audio_file_url: blob.url, audio_file_bytes: body.length }
+      ? { video_download_status: "ready", video_file_path: pathname, video_file_bytes: body.length }
+      : { audio_download_status: "ready", audio_file_path: pathname, audio_file_bytes: body.length }
   );
 
-  res.status(200).json({ ok: true, url: blob.url, bytes: body.length });
+  res.status(200).json({ ok: true, pathname, bytes: body.length });
 }

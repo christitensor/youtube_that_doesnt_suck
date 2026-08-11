@@ -128,13 +128,13 @@ export function WatchLater() {
                 >
                   {v.video_download_status === "ready" ? "Downloaded ✓" : "Download"}
                 </button>
-                {v.video_download_status === "ready" && v.video_file_url && (
-                  <a href={v.video_file_url} download className="save-link">
+                {v.video_download_status === "ready" && (
+                  <a href={`/api/videos/${v.video_id}/video-file`} download className="save-link">
                     Save to device
                   </a>
                 )}
-                {v.is_podcast === 1 && v.audio_download_status === "ready" && v.audio_file_url && (
-                  <a href={v.audio_file_url} download className="save-link">
+                {v.is_podcast === 1 && v.audio_download_status === "ready" && (
+                  <a href={`/api/videos/${v.video_id}/audio-file`} download className="save-link">
                     MP3
                   </a>
                 )}

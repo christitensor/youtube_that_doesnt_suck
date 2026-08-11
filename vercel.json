@@ -14,6 +14,8 @@
     "api/feed/[token].xml.ts": { "maxDuration": 15 },
     "api/feed-token.ts": { "maxDuration": 10 },
     "api/videos/[id]/watched.ts": { "maxDuration": 10 },
+    "api/videos/[id]/video-file.ts": { "maxDuration": 30 },
+    "api/videos/[id]/audio-file.ts": { "maxDuration": 30 },
     "api/health.ts": { "maxDuration": 10 }
   }
 }

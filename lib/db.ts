@@ -1,6 +1,6 @@
 // Single-user "database": the whole video queue lives as one JSON blob in
 // Vercel Blob storage. Read-modify-write, no separate DB service needed.
-import { put, list } from "@vercel/blob";
+import { put, get } from "@vercel/blob";
 
 const DB_PATHNAME = "db/videos.json";
 
@@ -20,11 +20,11 @@ export type VideoRecord = {
   podcast_reason: string | null;
 
   video_download_status: DownloadStatus;
-  video_file_url: string | null;
+  video_file_path: string | null;
   video_file_bytes: number | null;
 
   audio_download_status: DownloadStatus;
-  audio_file_url: string | null;
+  audio_file_path: string | null;
   audio_file_bytes: number | null;
 
   watched: 0 | 1;
@@ -41,12 +41,10 @@ function emptyDb(): Db {
 
 export async function readDb(): Promise<Db> {
   try {
-    const { blobs } = await list({ prefix: DB_PATHNAME, limit: 10 });
-    const found = blobs.find((b) => b.pathname === DB_PATHNAME);
-    if (!found) return emptyDb();
-    const res = await fetch(found.url, { cache: "no-store" });
-    if (!res.ok) return emptyDb();
-    const data = (await res.json()) as unknown;
+    const result = await get(DB_PATHNAME, { access: "private" });
+    if (!result || result.statusCode !== 200) return emptyDb();
+    const text = await new Response(result.stream).text();
+    const data = JSON.parse(text) as unknown;
     if (!data || typeof data !== "object" || !("videos" in (data as any))) {
       return emptyDb();
     }
@@ -59,7 +57,7 @@ export async function readDb(): Promise<Db> {
 
 export async function writeDb(db: Db): Promise<void> {
   await put(DB_PATHNAME, JSON.stringify(db), {
-    access: "public",
+    access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: "application/json",

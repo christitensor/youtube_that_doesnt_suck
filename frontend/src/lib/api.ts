@@ -10,10 +10,10 @@ export type VideoRow = {
   is_podcast: 0 | 1;
   podcast_reason: string | null;
   video_download_status: "none" | "downloading" | "ready" | "failed";
-  video_file_url: string | null;
+  video_file_path: string | null;
   video_file_bytes: number | null;
   audio_download_status: "none" | "downloading" | "ready" | "failed";
-  audio_file_url: string | null;
+  audio_file_path: string | null;
   audio_file_bytes: number | null;
   watched: 0 | 1;
 };

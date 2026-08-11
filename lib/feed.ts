@@ -15,7 +15,7 @@ export async function buildPodcastFeedXml(reqHost?: string): Promise<string> {
 
   const db = await readDb();
   const episodes = videosArray(db).filter(
-    (v) => v.is_podcast === 1 && v.audio_download_status === "ready" && v.audio_file_url
+    (v) => v.is_podcast === 1 && v.audio_download_status === "ready" && v.audio_file_path
   );
 
   for (const ep of episodes) {
@@ -26,9 +26,10 @@ export async function buildPodcastFeedXml(reqHost?: string): Promise<string> {
       guid: ep.video_id,
       date: ep.published_at ?? ep.added_at,
       enclosure: {
-        // Blob already gives a public URL — point the enclosure straight at
-        // it instead of proxying through our own /audio-file route.
-        url: ep.audio_file_url as string,
+        // The Blob store is private, so proxy through our own Function
+        // instead of a direct blob URL - podcast apps just need a stable,
+        // unauthenticated URL, which this endpoint provides.
+        url: `${base}/api/videos/${ep.video_id}/audio-file`,
         size: ep.audio_file_bytes ?? 0,
         type: "audio/mpeg",
       },
