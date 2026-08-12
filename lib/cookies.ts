@@ -18,8 +18,18 @@ export async function readCookiesText(): Promise<string | null> {
   }
 }
 
+const NETSCAPE_HEADER = "# Netscape HTTP Cookie File";
+
 export async function writeCookiesText(text: string): Promise<void> {
-  await put(COOKIES_PATHNAME, text, {
+  // yt-dlp (via Python's http.cookiejar) refuses to load a cookies.txt that
+  // doesn't start with this exact magic comment line - most browser cookie
+  // export extensions (e.g. Cookie Editor) skip it since it's Netscape/curl
+  // convention rather than part of the actual data, so add it if missing
+  // instead of making the upload fail.
+  const trimmed = text.trim();
+  const normalized = trimmed.startsWith("#") ? trimmed : `${NETSCAPE_HEADER}\n${trimmed}`;
+
+  await put(COOKIES_PATHNAME, `${normalized}\n`, {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
