@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type VideoRow } from "../lib/api";
+import { PlayIcon, DownloadIcon, CheckIcon, SyncIcon, MicIcon, SparkleIcon, CloseIcon, SaveIcon } from "../lib/icons";
 
 // How often (seconds of playback) to persist resume position while playing.
 const PROGRESS_SAVE_INTERVAL = 10;
@@ -120,11 +121,13 @@ export function WatchLater() {
   return (
     <div>
       <div className="toolbar">
-        <button onClick={handleSync} disabled={busy === "sync"}>
-          {busy === "sync" ? "Syncing…" : "Sync now"}
+        <button className="btn ghost" onClick={handleSync} disabled={busy === "sync"}>
+          <SyncIcon size={14} />
+          {busy === "sync" ? "Syncing…" : "Sync"}
         </button>
-        <button onClick={handleDownloadAll} disabled={busy === "download-all"} className="primary">
-          {busy === "download-all" ? "Queuing…" : "Download all to device"}
+        <button className="btn primary" onClick={handleDownloadAll} disabled={busy === "download-all"}>
+          <DownloadIcon size={14} />
+          {busy === "download-all" ? "Queuing…" : "Download all"}
         </button>
       </div>
 
@@ -132,6 +135,9 @@ export function WatchLater() {
 
       {playing && (
         <div className="player-overlay" onClick={closePlayer}>
+          <button className="player-close" onClick={closePlayer} aria-label="Close player">
+            <CloseIcon size={18} />
+          </button>
           <video
             ref={videoRef}
             src={playing.url}
@@ -156,31 +162,57 @@ export function WatchLater() {
       <ul className="video-list">
         {videos.map((v) => (
           <li key={v.video_id} className="video-card">
-            <img src={v.thumbnail_url ?? ""} alt="" loading="lazy" />
+            <div className="thumb-wrap">
+              <img src={v.thumbnail_url ?? ""} alt="" loading="lazy" />
+              <div className="thumb-badges">
+                {v.is_podcast === 1 && (
+                  <span className="chip">
+                    <MicIcon size={11} />
+                    Podcast
+                  </span>
+                )}
+                {v.video_download_status === "ready" && (
+                  <span className="chip hd">
+                    <SparkleIcon size={11} />
+                    HD ready
+                  </span>
+                )}
+              </div>
+              {v.duration_seconds ? <span className="duration-chip">{formatDuration(v.duration_seconds)}</span> : null}
+            </div>
             <div className="video-info">
               <h3>{v.title}</h3>
-              <p className="meta">
-                {v.channel_title} · {formatDuration(v.duration_seconds)}
-                {v.is_podcast === 1 && <span className="badge">🎙 podcast</span>}
-                {v.video_download_status === "ready" && <span className="badge">HD ready</span>}
-              </p>
+              <p className="meta">{v.channel_title}</p>
               <div className="video-actions">
-                <button onClick={() => handlePlay(v)} disabled={busy === v.video_id}>
-                  ▶ Play (ad-free)
+                <button className="btn primary" onClick={() => handlePlay(v)} disabled={busy === v.video_id}>
+                  <PlayIcon size={13} />
+                  Play
                 </button>
                 <button
+                  className="btn ghost"
                   onClick={() => handleDownloadVideo(v)}
                   disabled={busy === v.video_id || v.video_download_status === "ready"}
                 >
-                  {v.video_download_status === "ready" ? "Downloaded ✓" : "Download"}
+                  {v.video_download_status === "ready" ? (
+                    <>
+                      <CheckIcon size={13} />
+                      Downloaded
+                    </>
+                  ) : (
+                    <>
+                      <DownloadIcon size={13} />
+                      Download
+                    </>
+                  )}
                 </button>
                 {v.video_download_status === "ready" && (
-                  <a href={`/api/videos/${v.video_id}/video-file`} download className="save-link">
-                    Save to device
+                  <a href={`/api/videos/${v.video_id}/video-file`} download className="btn ghost">
+                    <SaveIcon size={13} />
+                    Save
                   </a>
                 )}
                 {v.is_podcast === 1 && v.audio_download_status === "ready" && (
-                  <a href={`/api/videos/${v.video_id}/audio-file`} download className="save-link">
+                  <a href={`/api/videos/${v.video_id}/audio-file`} download className="btn ghost">
                     MP3
                   </a>
                 )}
