@@ -14,38 +14,33 @@ const SANDBOX_TIMEOUT_MS = 25 * 60 * 1000; // 25 minutes, plenty for one video
 function buildScript(kind: JobKind, videoId: string, ingestUrl: string, cookiesText: string | null): string {
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
   // Cookies from a real signed-in browser session (uploaded via Settings)
-  // are what gets past YouTube's bot-check. Pinning to the "tv" client
-  // (confirmed fastest and most reliable via direct timing tests) instead
-  // of yt-dlp's slower default multi-client fallback.
+  // are what gets past YouTube's bot-check.
   // YouTube gates most real formats behind an obfuscated "n" signature
   // challenge that yt-dlp needs a JS runtime to solve - without one,
   // requests silently degrade to storyboard-only or SABR-gated formats
   // with no usable URL, regardless of cookies (confirmed by direct local
   // testing against a real video: zero playable formats without a JS
   // runtime, a working muxed mp4 with one).
+  // Deliberately NOT pinning a single player_client here (unlike the
+  // instant "Play" stream path, which pins "tv" for speed): querying
+  // yt-dlp's default set of clients together is what makes YouTube hand
+  // out URLs for the high-res video-only/audio-only DASH tracks at all.
+  // Pinning to one client alone was previously (wrongly) blamed on a
+  // YouTube-side "SABR-only" restriction requiring paid proxy/PO-token
+  // infra - it was actually this pin suppressing the format list.
+  // Confirmed via direct local testing: unpinned resolves up to 4K
+  // (315+251-7 3840x2160 vp9+opus) and a full download+merge produces a
+  // real, ffprobe-verified 1080p60 h264/aac file, no proxy needed.
   const cookiesArg = cookiesText ? `--cookies /tmp/cookies.txt` : "";
   const jsRuntimeArg = `$JS_RUNTIME_ARG`;
-  const clientArg = `--extractor-args "youtube:player_client=tv"`;
   const ytdlpArgs =
     kind === "video"
       ? // Combined (muxed) progressive formats top out at 360p (itag 18) -
         // higher resolutions only exist as separate video+audio tracks. We
         // ask for the best of each and let ffmpeg mux them (the Sandbox has
-        // time and ffmpeg for this, unlike the instant "Play" stream) -
-        // *when YouTube actually hands out a URL for them*. As of this
-        // writing YouTube is enforcing "SABR-only" streaming for these
-        // split tracks on every client we have working (confirmed via
-        // direct testing: bestvideo+bestaudio errors "Requested format is
-        // not available" every time, consistently, not intermittently),
-        // which strips their direct URLs entirely without a Proof-of-Origin
-        // token provider - a persistent headless-browser service beyond
-        // what's reasonable to run for this project. So this currently
-        // falls through to 360p regardless, same ceiling as Play. Left as
-        // bestvideo+bestaudio-first (rather than reverting to a plain
-        // best-only selector) so it self-upgrades to real quality without
-        // another code change if/when that restriction eases.
-        `-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --merge-output-format mp4 -o "out.%(ext)s" --no-playlist --no-warnings ${clientArg} ${jsRuntimeArg} ${cookiesArg}`
-      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${clientArg} ${jsRuntimeArg} ${cookiesArg}`;
+        // time and ffmpeg for this, unlike the instant "Play" stream).
+        `-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --merge-output-format mp4 -o "out.%(ext)s" --no-playlist --no-warnings ${jsRuntimeArg} ${cookiesArg}`
+      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${jsRuntimeArg} ${cookiesArg}`;
 
   const cookiesSetup = cookiesText
     ? `cat > /tmp/cookies.txt <<'YTDLP_COOKIES_EOF'\n${cookiesText}\nYTDLP_COOKIES_EOF\nchmod 600 /tmp/cookies.txt\n`
