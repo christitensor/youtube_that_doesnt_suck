@@ -11,6 +11,14 @@ import { WATCH_LATER_PLAYLIST_ID } from "../lib/env.js";
 // over gets picked up on the next scheduled sync (every ~15 min).
 const MAX_EXTRACTIONS_PER_SYNC = 3;
 
+// Same idea, but for full-quality video renders: proactively render videos
+// in the queue in the background (Sandbox: bestvideo+bestaudio merged via
+// ffmpeg) so they're already sitting in Blob storage by the time Chris
+// taps Play, instead of only starting a render on the first play tap. Kept
+// small since this runs alongside the audio-extraction batch above and
+// Sandbox concurrency isn't unlimited.
+const MAX_VIDEO_PREPARES_PER_SYNC = 2;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET" && req.method !== "POST") {
     res.status(405).json({ error: "method not allowed" });
@@ -103,11 +111,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // Best-effort: proactively render a batch of still-unprepared videos in
+    // the background so Play is instant + full quality once they're ready.
+    const pendingVideos = videosArray(db).filter(
+      (v) => v.removed_from_source === 0 && v.video_download_status === "none"
+    );
+    let videoPreparesKicked = 0;
+    for (const v of pendingVideos.slice(0, MAX_VIDEO_PREPARES_PER_SYNC)) {
+      try {
+        await updateVideo(v.video_id, { video_download_status: "downloading" });
+        await kickoffDownloadJob(v.video_id, "video", host);
+        videoPreparesKicked++;
+      } catch (err) {
+        console.error("[sync] failed to kick off video prepare for", v.video_id, err);
+        await updateVideo(v.video_id, { video_download_status: "failed" }).catch(() => {});
+      }
+    }
+
     res.status(200).json({
       added,
       total: items.length,
       podcastExtractionsQueued: extractionsKicked,
       podcastExtractionsPending: pending.length - extractionsKicked,
+      videoPreparesQueued: videoPreparesKicked,
+      videoPreparesPending: pendingVideos.length - videoPreparesKicked,
     });
   } catch (err: any) {
     console.error("[sync] failed:", err);

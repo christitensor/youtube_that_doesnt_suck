@@ -162,6 +162,7 @@ export function WatchLater() {
               <p className="meta">
                 {v.channel_title} · {formatDuration(v.duration_seconds)}
                 {v.is_podcast === 1 && <span className="badge">🎙 podcast</span>}
+                {v.video_download_status === "ready" && <span className="badge">HD ready</span>}
               </p>
               <div className="video-actions">
                 <button onClick={() => handlePlay(v)} disabled={busy === v.video_id}>
