@@ -6,38 +6,34 @@
 import { put, get } from "@vercel/blob";
 
 const COOKIES_PATHNAME = "secrets/cookies.txt";
-
-export async function readCookiesText(): Promise<string | null> {
-  try {
-    const result = await get(COOKIES_PATHNAME, { access: "private" });
-    if (!result || result.statusCode !== 200) return null;
-    const text = await new Response(result.stream).text();
-    return text.trim() ? text : null;
-  } catch {
-    return null;
-  }
-}
-
 const NETSCAPE_HEADER = "# Netscape HTTP Cookie File";
 
-/** Python's http.cookiejar (which yt-dlp uses) hard-asserts that a cookie
- * line's "include subdomains" flag (2nd field) agrees with whether the
- * domain (1st field) has a leading dot - mismatched rows raise
- * AssertionError and abort loading the *entire* file. Browser cookie-export
- * extensions (e.g. Cookie Editor) routinely emit TRUE without the leading
- * dot, so reconcile them instead of failing the upload. Making TRUE rows
- * domain-wide (".youtube.com") is also what we want functionally, since
- * yt-dlp's requests hit www.youtube.com while these often get exported
- * scoped to m.youtube.com or similar. */
-function normalizeNetscapeCookies(text: string): string {
-  return text
+/** Fixes up whatever a browser cookie-export extension handed us so yt-dlp
+ * (via Python's http.cookiejar) will actually load it:
+ *  1. Prepends the magic "# Netscape HTTP Cookie File" comment line, which
+ *     most export tools omit even though the loader requires it.
+ *  2. Reconciles each row's "include subdomains" flag (2nd field) with
+ *     whether its domain (1st field) has a leading dot - the loader
+ *     hard-asserts these agree and aborts loading the *entire* file on a
+ *     single mismatched row, which export tools produce constantly (e.g.
+ *     "m.youtube.com" + TRUE). Making TRUE rows domain-wide is also what we
+ *     want functionally, since yt-dlp's requests hit www.youtube.com while
+ *     these often get exported scoped to m.youtube.com or similar.
+ * Applied on every read (not just on upload) so a cookies.txt saved before
+ * this logic existed - or before a fix to it - self-heals without Chris
+ * needing to re-paste it into Settings. */
+function sanitizeCookiesText(text: string): string {
+  const trimmed = text.trim();
+  const withHeader = trimmed.startsWith("#") ? trimmed : `${NETSCAPE_HEADER}\n${trimmed}`;
+
+  return withHeader
     .replace(/\r\n/g, "\n")
     .split("\n")
     .map((line) => {
-      const trimmed = line.trimEnd();
-      if (!trimmed || trimmed.startsWith("#")) return trimmed;
-      const parts = trimmed.split("\t");
-      if (parts.length !== 7) return trimmed;
+      const t = line.trimEnd();
+      if (!t || t.startsWith("#")) return t;
+      const parts = t.split("\t");
+      if (parts.length !== 7) return t;
       const [domain, domainSpecified, path, secure, expires, name, value] = parts;
       const hasDot = domain.startsWith(".");
       let fixedDomain = domain;
@@ -48,16 +44,20 @@ function normalizeNetscapeCookies(text: string): string {
     .join("\n");
 }
 
-export async function writeCookiesText(text: string): Promise<void> {
-  // yt-dlp (via Python's http.cookiejar) refuses to load a cookies.txt that
-  // doesn't start with this exact magic comment line - most browser cookie
-  // export extensions (e.g. Cookie Editor) skip it since it's Netscape/curl
-  // convention rather than part of the actual data, so add it if missing
-  // instead of making the upload fail.
-  const trimmed = text.trim();
-  const withHeader = trimmed.startsWith("#") ? trimmed : `${NETSCAPE_HEADER}\n${trimmed}`;
-  const normalized = normalizeNetscapeCookies(withHeader);
+export async function readCookiesText(): Promise<string | null> {
+  try {
+    const result = await get(COOKIES_PATHNAME, { access: "private" });
+    if (!result || result.statusCode !== 200) return null;
+    const text = await new Response(result.stream).text();
+    if (!text.trim()) return null;
+    return sanitizeCookiesText(text);
+  } catch {
+    return null;
+  }
+}
 
+export async function writeCookiesText(text: string): Promise<void> {
+  const normalized = sanitizeCookiesText(text);
   await put(COOKIES_PATHNAME, `${normalized}\n`, {
     access: "private",
     addRandomSuffix: false,
