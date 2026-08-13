@@ -20,15 +20,32 @@ function buildScript(kind: JobKind, videoId: string, ingestUrl: string, cookiesT
   // often only expose adaptive-only formats (no combined video+audio
   // file), which made "best[ext=mp4]/best" match nothing. Let yt-dlp pick
   // its normal default client.
+  // YouTube gates most real formats behind an obfuscated "n" signature
+  // challenge that yt-dlp needs a JS runtime to solve - without one,
+  // requests silently degrade to storyboard-only or SABR-gated formats
+  // with no usable URL, regardless of cookies (confirmed by direct local
+  // testing against a real video: zero playable formats without a JS
+  // runtime, a working muxed mp4 with one).
   const cookiesArg = cookiesText ? `--cookies /tmp/cookies.txt` : "";
+  const jsRuntimeArg = `$JS_RUNTIME_ARG`;
   const ytdlpArgs =
     kind === "video"
-      ? `-f "best[ext=mp4]/best" -o "out.%(ext)s" --no-playlist --no-warnings ${cookiesArg}`
-      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${cookiesArg}`;
+      ? `-f "best[ext=mp4]/best" -o "out.%(ext)s" --no-playlist --no-warnings ${jsRuntimeArg} ${cookiesArg}`
+      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${jsRuntimeArg} ${cookiesArg}`;
 
   const cookiesSetup = cookiesText
     ? `cat > /tmp/cookies.txt <<'YTDLP_COOKIES_EOF'\n${cookiesText}\nYTDLP_COOKIES_EOF\nchmod 600 /tmp/cookies.txt\n`
     : "";
+
+  const nodeSetup = `
+if ! command -v node >/dev/null 2>&1; then
+  apt-get update -y >/tmp/apt.log 2>&1 && apt-get install -y nodejs >>/tmp/apt.log 2>&1
+fi
+JS_RUNTIME_ARG=""
+if command -v node >/dev/null 2>&1; then
+  JS_RUNTIME_ARG="--js-runtimes node:$(command -v node)"
+fi
+`;
 
   const ffmpegSetup =
     kind === "audio"
@@ -53,6 +70,7 @@ cd /tmp
 curl -sL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux" || { ${fail}; exit 1; }
 chmod +x /tmp/yt-dlp
 ${cookiesSetup}
+${nodeSetup}
 ${ffmpegSetup}
 mkdir -p /tmp/work && cd /tmp/work
 /tmp/yt-dlp ${ytdlpArgs} "${ytUrl}"

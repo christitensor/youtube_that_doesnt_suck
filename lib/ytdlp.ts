@@ -99,6 +99,13 @@ function videoUrl(videoId: string): string {
 
 const SEP = "\x1f";
 
+// YouTube gates most real formats behind an obfuscated "n" signature
+// challenge that yt-dlp needs a JS runtime to solve - without one, requests
+// silently degrade to storyboard-only or SABR-gated formats with no usable
+// URL, regardless of cookies. Vercel Node Functions already run on Node, so
+// point yt-dlp at that same binary instead of needing a separate install.
+const JS_RUNTIME_ARGS = ["--js-runtimes", `node:${process.execPath}`];
+
 export type FlatPlaylistItem = {
   videoId: string;
   title: string;
@@ -119,6 +126,7 @@ export async function listPlaylist(playlistId: string): Promise<FlatPlaylistItem
       "--ignore-errors",
       "--print",
       `%(id)s${SEP}%(title)s${SEP}%(duration)s${SEP}%(channel)s${SEP}%(uploader)s`,
+      ...JS_RUNTIME_ARGS,
       ...(await cookieArgs()),
     ],
     55_000,
@@ -160,6 +168,7 @@ export async function getDirectStreamUrl(videoId: string): Promise<string> {
       // only expose adaptive-only formats (no combined video+audio file),
       // which made every request 404 with "Requested format is not
       // available". Let yt-dlp pick its normal default client.
+      ...JS_RUNTIME_ARGS,
       ...(await cookieArgs()),
     ],
     40_000,
