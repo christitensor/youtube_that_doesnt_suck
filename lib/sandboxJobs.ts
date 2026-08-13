@@ -13,17 +13,18 @@ const SANDBOX_TIMEOUT_MS = 25 * 60 * 1000; // 25 minutes, plenty for one video
 
 function buildScript(kind: JobKind, videoId: string, ingestUrl: string, cookiesText: string | null): string {
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  // Cloud/datacenter IPs (Sandbox included) get YouTube's "confirm you're
-  // not a bot" wall on almost every request now - player_client tricks alone
-  // don't reliably get through from real Vercel/Sandbox IPs, so cookies from
-  // a real signed-in session (uploaded via Settings) are the primary fix,
-  // with player_client kept as a harmless secondary hint.
+  // Cookies from a real signed-in browser session (uploaded via Settings)
+  // are what gets past YouTube's bot-check. Forcing a specific
+  // player_client (tried earlier, before cookies) is no longer needed and
+  // was actively counterproductive for video downloads: tv_embedded/mweb
+  // often only expose adaptive-only formats (no combined video+audio
+  // file), which made "best[ext=mp4]/best" match nothing. Let yt-dlp pick
+  // its normal default client.
   const cookiesArg = cookiesText ? `--cookies /tmp/cookies.txt` : "";
-  const clientArgs = `--extractor-args "youtube:player_client=tv_embedded,mweb" ${cookiesArg}`;
   const ytdlpArgs =
     kind === "video"
-      ? `-f "best[ext=mp4]/best" -o "out.%(ext)s" --no-playlist --no-warnings ${clientArgs}`
-      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${clientArgs}`;
+      ? `-f "best[ext=mp4]/best" -o "out.%(ext)s" --no-playlist --no-warnings ${cookiesArg}`
+      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${cookiesArg}`;
 
   const cookiesSetup = cookiesText
     ? `cat > /tmp/cookies.txt <<'YTDLP_COOKIES_EOF'\n${cookiesText}\nYTDLP_COOKIES_EOF\nchmod 600 /tmp/cookies.txt\n`

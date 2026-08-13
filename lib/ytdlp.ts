@@ -153,14 +153,13 @@ export async function getDirectStreamUrl(videoId: string): Promise<string> {
       "best[ext=mp4]/best",
       "--get-url",
       "--no-warnings",
-      // Cloud/datacenter IPs (Vercel included) get YouTube's "confirm you're
-      // not a bot" wall on most clients now, even with player-client
-      // tricks (web, android, ios, tv, tv_embedded, mweb all tested
-      // blocked from Vercel's actual production IPs). Cookies from a real
-      // signed-in browser session (uploaded via Settings) are the reliable
-      // fix; player_client is kept as a harmless secondary hint.
-      "--extractor-args",
-      "youtube:player_client=tv_embedded,mweb",
+      // Cookies from a real signed-in browser session (uploaded via
+      // Settings) are what gets past YouTube's bot-check now - forcing a
+      // specific player_client (tried earlier, before cookies) is no longer
+      // needed and was actively counterproductive: tv_embedded/mweb often
+      // only expose adaptive-only formats (no combined video+audio file),
+      // which made every request 404 with "Requested format is not
+      // available". Let yt-dlp pick its normal default client.
       ...(await cookieArgs()),
     ],
     40_000,
