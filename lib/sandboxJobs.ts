@@ -14,12 +14,9 @@ const SANDBOX_TIMEOUT_MS = 25 * 60 * 1000; // 25 minutes, plenty for one video
 function buildScript(kind: JobKind, videoId: string, ingestUrl: string, cookiesText: string | null): string {
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
   // Cookies from a real signed-in browser session (uploaded via Settings)
-  // are what gets past YouTube's bot-check. Forcing a specific
-  // player_client (tried earlier, before cookies) is no longer needed and
-  // was actively counterproductive for video downloads: tv_embedded/mweb
-  // often only expose adaptive-only formats (no combined video+audio
-  // file), which made "best[ext=mp4]/best" match nothing. Let yt-dlp pick
-  // its normal default client.
+  // are what gets past YouTube's bot-check. Pinning to the "tv" client
+  // (confirmed fastest and most reliable via direct timing tests) instead
+  // of yt-dlp's slower default multi-client fallback.
   // YouTube gates most real formats behind an obfuscated "n" signature
   // challenge that yt-dlp needs a JS runtime to solve - without one,
   // requests silently degrade to storyboard-only or SABR-gated formats
@@ -28,10 +25,27 @@ function buildScript(kind: JobKind, videoId: string, ingestUrl: string, cookiesT
   // runtime, a working muxed mp4 with one).
   const cookiesArg = cookiesText ? `--cookies /tmp/cookies.txt` : "";
   const jsRuntimeArg = `$JS_RUNTIME_ARG`;
+  const clientArg = `--extractor-args "youtube:player_client=tv"`;
   const ytdlpArgs =
     kind === "video"
-      ? `-f "best[ext=mp4]/best" -o "out.%(ext)s" --no-playlist --no-warnings ${jsRuntimeArg} ${cookiesArg}`
-      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${jsRuntimeArg} ${cookiesArg}`;
+      ? // Combined (muxed) progressive formats top out at 360p (itag 18) -
+        // higher resolutions only exist as separate video+audio tracks. We
+        // ask for the best of each and let ffmpeg mux them (the Sandbox has
+        // time and ffmpeg for this, unlike the instant "Play" stream) -
+        // *when YouTube actually hands out a URL for them*. As of this
+        // writing YouTube is enforcing "SABR-only" streaming for these
+        // split tracks on every client we have working (confirmed via
+        // direct testing: bestvideo+bestaudio errors "Requested format is
+        // not available" every time, consistently, not intermittently),
+        // which strips their direct URLs entirely without a Proof-of-Origin
+        // token provider - a persistent headless-browser service beyond
+        // what's reasonable to run for this project. So this currently
+        // falls through to 360p regardless, same ceiling as Play. Left as
+        // bestvideo+bestaudio-first (rather than reverting to a plain
+        // best-only selector) so it self-upgrades to real quality without
+        // another code change if/when that restriction eases.
+        `-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --merge-output-format mp4 -o "out.%(ext)s" --no-playlist --no-warnings ${clientArg} ${jsRuntimeArg} ${cookiesArg}`
+      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${clientArg} ${jsRuntimeArg} ${cookiesArg}`;
 
   const cookiesSetup = cookiesText
     ? `cat > /tmp/cookies.txt <<'YTDLP_COOKIES_EOF'\n${cookiesText}\nYTDLP_COOKIES_EOF\nchmod 600 /tmp/cookies.txt\n`
@@ -47,9 +61,9 @@ if command -v node >/dev/null 2>&1; then
 fi
 `;
 
-  const ffmpegSetup =
-    kind === "audio"
-      ? `
+  // Needed for both kinds now: audio extraction always required it, and
+  // video downloads now merge separate video+audio tracks into one mp4.
+  const ffmpegSetup = `
 if ! command -v ffmpeg >/dev/null 2>&1; then
   apt-get update -y >/tmp/apt.log 2>&1 && apt-get install -y ffmpeg >>/tmp/apt.log 2>&1
 fi
@@ -59,8 +73,7 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
   FFDIR=$(find /tmp -maxdepth 1 -type d -name 'ffmpeg-*-amd64-static' | head -1)
   export PATH="$FFDIR:$PATH"
 fi
-`
-      : "";
+`;
 
   const fail = `curl -sS -X POST "${ingestUrl}" -H "Authorization: Bearer ${CRON_SECRET}" -H "X-Video-Id: ${videoId}" -H "X-Kind: ${kind}" -H "X-Status: failed" >/tmp/ingest-fail.log 2>&1 || true`;
 

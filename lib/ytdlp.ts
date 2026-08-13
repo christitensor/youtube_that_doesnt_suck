@@ -150,10 +150,8 @@ export async function listPlaylist(playlistId: string): Promise<FlatPlaylistItem
   return items;
 }
 
-/** Resolves a direct, ad-free media URL for in-app streaming (not saved to
- * disk) — the whole point of not using YouTube's own embedded player. */
-export async function getDirectStreamUrl(videoId: string): Promise<string> {
-  await ensureYtDlp();
+async function resolveStreamUrl(videoId: string, playerClient: string | null): Promise<string> {
+  const clientArgs = playerClient ? ["--extractor-args", `youtube:player_client=${playerClient}`] : [];
   const stdout = await runWithRetry(
     [
       videoUrl(videoId),
@@ -161,20 +159,35 @@ export async function getDirectStreamUrl(videoId: string): Promise<string> {
       "best[ext=mp4]/best",
       "--get-url",
       "--no-warnings",
-      // Cookies from a real signed-in browser session (uploaded via
-      // Settings) are what gets past YouTube's bot-check now - forcing a
-      // specific player_client (tried earlier, before cookies) is no longer
-      // needed and was actively counterproductive: tv_embedded/mweb often
-      // only expose adaptive-only formats (no combined video+audio file),
-      // which made every request 404 with "Requested format is not
-      // available". Let yt-dlp pick its normal default client.
+      ...clientArgs,
       ...JS_RUNTIME_ARGS,
       ...(await cookieArgs()),
     ],
     40_000,
-    1
+    0
   );
   const url = stdout.trim().split("\n").at(-1);
   if (!url) throw new Error(`yt-dlp returned no stream URL for ${videoId}`);
   return url;
+}
+
+/** Resolves a direct, ad-free media URL for in-app streaming (not saved to
+ * disk) — the whole point of not using YouTube's own embedded player. */
+export async function getDirectStreamUrl(videoId: string): Promise<string> {
+  await ensureYtDlp();
+  // Cookies from a real signed-in browser session (uploaded via Settings)
+  // are what gets past YouTube's bot-check now - forcing a specific
+  // player_client is no longer needed for auth. But pinning to a single
+  // client (instead of yt-dlp's default multi-client fallback, which
+  // queries two full player APIs back-to-back) cuts resolution time by
+  // roughly a third, confirmed by direct timing tests against a real
+  // video: "tv" alone consistently returns the muxed 360p format (itag 18)
+  // this needs. Fall back to yt-dlp's own default (slower but more
+  // resilient) client selection if "tv" ever stops working.
+  try {
+    return await resolveStreamUrl(videoId, "tv");
+  } catch (err) {
+    console.error(`[ytdlp] "tv" client failed for ${videoId}, falling back to default client selection:`, err);
+    return resolveStreamUrl(videoId, null);
+  }
 }
