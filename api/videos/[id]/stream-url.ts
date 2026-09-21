@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getDirectStreamUrl } from "../../../lib/ytdlp.js";
-import { readDb, updateVideo } from "../../../lib/db.js";
+import { readDb, updateVideo, errorMessage } from "../../../lib/db.js";
 import { kickoffDownloadJob } from "../../../lib/sandboxJobs.js";
+import { presignedReadUrl } from "../../../lib/blobUrls.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const id = req.query.id;
@@ -18,10 +19,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // video) - serve that directly from Blob storage instead of resolving a
     // fresh direct URL, which is capped at 360p (progressive/muxed formats
     // top out there on every client, a real YouTube-side limit). This is
-    // also strictly faster: no yt-dlp shellout at all, just a blob stream.
+    // also strictly faster: no yt-dlp shellout at all. The <video> element
+    // talks to Blob's CDN directly via a presigned URL (Range works there).
     if (video?.video_download_status === "ready" && video.video_file_path) {
       res.setHeader("Cache-Control", "no-store");
-      res.status(200).json({ url: `/api/videos/${id}/video-file` });
+      res.status(200).json({ url: await presignedReadUrl(video.video_file_path) });
       return;
     }
 
@@ -33,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await updateVideo(id, { video_download_status: "downloading" });
       kickoffDownloadJob(id, "video", req.headers.host as string | undefined).catch((err) => {
         console.error("[stream-url] background render failed to start for", id, err);
-        updateVideo(id, { video_download_status: "failed" }).catch(() => {});
+        updateVideo(id, { video_download_status: "failed", last_error: errorMessage(err) }).catch(() => {});
       });
     }
 

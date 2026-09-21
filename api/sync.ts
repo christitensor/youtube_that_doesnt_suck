@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { readDb, writeDb, videosArray, updateVideo, type VideoRecord } from "../lib/db.js";
+import { readDb, writeDb, videosArray, updateVideo, errorMessage, type VideoRecord } from "../lib/db.js";
 import { classifyPodcast } from "../lib/podcastDetector.js";
 import { listPlaylist } from "../lib/ytdlp.js";
 import { kickoffDownloadJob } from "../lib/sandboxJobs.js";
@@ -107,7 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         extractionsKicked++;
       } catch (err) {
         console.error("[sync] failed to kick off audio extraction for", v.video_id, err);
-        await updateVideo(v.video_id, { audio_download_status: "failed" }).catch(() => {});
+        await updateVideo(v.video_id, { audio_download_status: "failed", last_error: errorMessage(err) }).catch(() => {});
       }
     }
 
@@ -124,7 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         videoPreparesKicked++;
       } catch (err) {
         console.error("[sync] failed to kick off video prepare for", v.video_id, err);
-        await updateVideo(v.video_id, { video_download_status: "failed" }).catch(() => {});
+        await updateVideo(v.video_id, { video_download_status: "failed", last_error: errorMessage(err) }).catch(() => {});
       }
     }
 

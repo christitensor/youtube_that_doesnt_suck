@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { readDb, updateVideo } from "../../../lib/db.js";
+import { readDb, updateVideo, errorMessage } from "../../../lib/db.js";
 import { kickoffDownloadJob } from "../../../lib/sandboxJobs.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -24,7 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(202).json({ status: "queued" });
   } catch (err: any) {
     console.error("[download] failed to kick off job for", id, err);
-    await updateVideo(id, { video_download_status: "failed" }).catch(() => {});
+    await updateVideo(id, { video_download_status: "failed", last_error: errorMessage(err) }).catch(() => {});
     res.status(502).json({ error: err?.message || String(err) });
   }
 }

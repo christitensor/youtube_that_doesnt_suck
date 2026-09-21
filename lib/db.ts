@@ -30,6 +30,10 @@ export type VideoRecord = {
   watched: 0 | 1;
   resume_seconds: number;
   removed_from_source: 0 | 1;
+
+  /** Why the most recent video/audio job failed (log tail from the Sandbox,
+   * or the error from starting it). Cleared when a job succeeds. */
+  last_error?: string | null;
 };
 
 export type Db = {
@@ -64,6 +68,11 @@ export async function writeDb(db: Db): Promise<void> {
     contentType: "application/json",
     cacheControlMaxAge: 60,
   });
+}
+
+export function errorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.slice(0, 1000);
 }
 
 export function videosArray(db: Db): VideoRecord[] {

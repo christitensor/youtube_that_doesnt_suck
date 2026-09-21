@@ -7,6 +7,12 @@ import { Sandbox } from "@vercel/sandbox";
 import { CRON_SECRET, publicBaseUrl } from "./env.js";
 import { readCookiesText } from "./cookies.js";
 
+// The Sandbox uploads the finished file straight to Blob (multipart, from
+// inside the microVM) using this token, then tells /api/ingest it's done.
+// Posting the file itself to /api/ingest can't work: Vercel Functions reject
+// request bodies over ~4.5 MB, and any real video is far bigger.
+const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN ?? "";
+
 export type JobKind = "video" | "audio";
 
 const SANDBOX_TIMEOUT_MS = 25 * 60 * 1000; // 25 minutes, plenty for one video
@@ -46,9 +52,14 @@ function buildScript(kind: JobKind, videoId: string, ingestUrl: string, cookiesT
     ? `cat > /tmp/cookies.txt <<'YTDLP_COOKIES_EOF'\n${cookiesText}\nYTDLP_COOKIES_EOF\nchmod 600 /tmp/cookies.txt\n`
     : "";
 
+  // Don't assume which package manager the Sandbox image has (dnf on Amazon
+  // Linux, apt-get on Debian/Ubuntu) - try whichever exists. Node is also
+  // needed to run the Blob upload below.
   const nodeSetup = `
 if ! command -v node >/dev/null 2>&1; then
-  apt-get update -y >/tmp/apt.log 2>&1 && apt-get install -y nodejs >>/tmp/apt.log 2>&1
+  if command -v dnf >/dev/null 2>&1; then dnf install -y nodejs npm
+  elif command -v apt-get >/dev/null 2>&1; then apt-get update -y && apt-get install -y nodejs npm
+  fi
 fi
 JS_RUNTIME_ARG=""
 if command -v node >/dev/null 2>&1; then
@@ -59,39 +70,74 @@ fi
   // Needed for both kinds now: audio extraction always required it, and
   // video downloads now merge separate video+audio tracks into one mp4.
   const ffmpegSetup = `
-if ! command -v ffmpeg >/dev/null 2>&1; then
-  apt-get update -y >/tmp/apt.log 2>&1 && apt-get install -y ffmpeg >>/tmp/apt.log 2>&1
+if ! command -v ffmpeg >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+  apt-get update -y && apt-get install -y ffmpeg
 fi
 if ! command -v ffmpeg >/dev/null 2>&1; then
-  curl -sL -o /tmp/ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-  tar xf /tmp/ffmpeg.tar.xz -C /tmp
+  command -v xz >/dev/null 2>&1 || { command -v dnf >/dev/null 2>&1 && dnf install -y xz; }
+  curl -sSL -o /tmp/ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" \\
+    && tar xf /tmp/ffmpeg.tar.xz -C /tmp
   FFDIR=$(find /tmp -maxdepth 1 -type d -name 'ffmpeg-*-amd64-static' | head -1)
-  export PATH="$FFDIR:$PATH"
+  [ -n "$FFDIR" ] && export PATH="$FFDIR:$PATH"
 fi
 `;
 
-  const fail = `curl -sS -X POST "${ingestUrl}" -H "Authorization: Bearer ${CRON_SECRET}" -H "X-Video-Id: ${videoId}" -H "X-Kind: ${kind}" -H "X-Status: failed" >/tmp/ingest-fail.log 2>&1 || true`;
+  const ext = kind === "video" ? "mp4" : "mp3";
+  const contentType = kind === "video" ? "video/mp4" : "audio/mpeg";
+  const pathname = `media/${kind}/${videoId}.${ext}`;
+
+  // Everything the script prints goes to one log; on failure its tail is
+  // sent back to /api/ingest and stored on the video as `last_error`, so a
+  // failed job says *why* instead of just "failed".
+  const callback = (extraHeaders: string) =>
+    `curl -sS -f -X POST "${ingestUrl}" -H "Authorization: Bearer ${CRON_SECRET}" -H "X-Video-Id: ${videoId}" -H "X-Kind: ${kind}" ${extraHeaders}`;
+  const fail = `fail() { echo "FAILED: $1"; ${callback('-H "X-Status: failed" -H "X-Error-B64: $(tail -c 900 /tmp/job.log | base64 -w0)"')} >/dev/null 2>&1 || true; exit 1; }`;
+
+  // put() from @vercel/blob does the multipart upload of the (large) file.
+  const uploadScript = `
+import { put } from "@vercel/blob";
+import fs from "node:fs";
+const [file, pathname, contentType] = process.argv.slice(2);
+const res = await put(pathname, fs.createReadStream(file), {
+  access: "private",
+  addRandomSuffix: false,
+  allowOverwrite: true,
+  contentType,
+  multipart: true,
+});
+console.log("uploaded", res.pathname);
+`;
 
   return `#!/bin/bash
+exec >/tmp/job.log 2>&1
 set -u
+${fail}
 cd /tmp
-curl -sL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux" || { ${fail}; exit 1; }
+curl -sSL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux" || fail "could not download yt-dlp"
 chmod +x /tmp/yt-dlp
 ${cookiesSetup}
 ${nodeSetup}
 ${ffmpegSetup}
+command -v node >/dev/null 2>&1 || fail "node is not available in the sandbox"
+command -v ffmpeg >/dev/null 2>&1 || fail "ffmpeg is not available in the sandbox"
 mkdir -p /tmp/work && cd /tmp/work
-/tmp/yt-dlp ${ytdlpArgs} "${ytUrl}"
-if [ $? -ne 0 ]; then ${fail}; exit 1; fi
+/tmp/yt-dlp ${ytdlpArgs} "${ytUrl}" || fail "yt-dlp failed"
 FILE=$(ls out.* 2>/dev/null | head -1)
-if [ -z "$FILE" ]; then ${fail}; exit 1; fi
-curl -sS -X POST "${ingestUrl}" \\
-  -H "Authorization: Bearer ${CRON_SECRET}" \\
-  -H "Content-Type: application/octet-stream" \\
-  -H "X-Video-Id: ${videoId}" \\
-  -H "X-Kind: ${kind}" \\
-  -H "X-Filename: $FILE" \\
-  --data-binary "@$FILE"
+[ -n "$FILE" ] || fail "yt-dlp produced no output file"
+BYTES=$(stat -c %s "$FILE")
+echo "downloaded $FILE ($BYTES bytes), uploading to blob"
+
+mkdir -p /tmp/up && cd /tmp/up
+cat > upload.mjs <<'UPLOAD_EOF'
+${uploadScript}
+UPLOAD_EOF
+npm init -y >/dev/null 2>&1
+npm install @vercel/blob@^2.8.0 --no-audit --no-fund || fail "npm install @vercel/blob failed"
+export BLOB_READ_WRITE_TOKEN='${BLOB_TOKEN}'
+node upload.mjs "/tmp/work/$FILE" "${pathname}" "${contentType}" || fail "blob upload failed"
+
+${callback('-H "X-Status: uploaded" -H "X-Pathname: ' + pathname + '" -H "X-Bytes: $BYTES" -d ""')} || fail "ingest callback failed"
+echo done
 `;
 }
 

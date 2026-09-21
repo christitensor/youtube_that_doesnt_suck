@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { readDb, videosArray, updateVideo } from "../lib/db.js";
+import { readDb, videosArray, updateVideo, errorMessage } from "../lib/db.js";
 import { kickoffDownloadJob } from "../lib/sandboxJobs.js";
 
 // Cap how many Sandboxes a single "Download all" tap spins up at once — the
@@ -27,7 +27,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       queued++;
     } catch (err) {
       console.error("[download-all] failed to kick off job for", v.video_id, err);
-      await updateVideo(v.video_id, { video_download_status: "failed" }).catch(() => {});
+      await updateVideo(v.video_id, { video_download_status: "failed", last_error: errorMessage(err) }).catch(() => {});
     }
   }
 

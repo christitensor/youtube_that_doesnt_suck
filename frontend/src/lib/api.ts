@@ -13,6 +13,7 @@ export type VideoRow = {
   video_file_path: string | null;
   video_file_bytes: number | null;
   audio_download_status: "none" | "downloading" | "ready" | "failed";
+  last_error?: string | null;
   audio_file_path: string | null;
   audio_file_bytes: number | null;
   watched: 0 | 1;
