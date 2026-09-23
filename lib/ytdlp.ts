@@ -150,7 +150,7 @@ export async function listPlaylist(playlistId: string): Promise<FlatPlaylistItem
   return items;
 }
 
-async function resolveStreamUrl(videoId: string, playerClient: string | null): Promise<string> {
+async function resolveStreamUrl(videoId: string, playerClient: string | null, timeoutMs = 40_000): Promise<string> {
   const clientArgs = playerClient ? ["--extractor-args", `youtube:player_client=${playerClient}`] : [];
   const stdout = await runWithRetry(
     [
@@ -163,7 +163,7 @@ async function resolveStreamUrl(videoId: string, playerClient: string | null): P
       ...JS_RUNTIME_ARGS,
       ...(await cookieArgs()),
     ],
-    40_000,
+    timeoutMs,
     0
   );
   const url = stdout.trim().split("\n").at(-1);
@@ -175,19 +175,34 @@ async function resolveStreamUrl(videoId: string, playerClient: string | null): P
  * disk) — the whole point of not using YouTube's own embedded player. */
 export async function getDirectStreamUrl(videoId: string): Promise<string> {
   await ensureYtDlp();
-  // Cookies from a real signed-in browser session (uploaded via Settings)
-  // are what gets past YouTube's bot-check now - forcing a specific
-  // player_client is no longer needed for auth. But pinning to a single
-  // client (instead of yt-dlp's default multi-client fallback, which
-  // queries two full player APIs back-to-back) cuts resolution time by
-  // roughly a third, confirmed by direct timing tests against a real
-  // video: "tv" alone consistently returns the muxed 360p format (itag 18)
-  // this needs. Fall back to yt-dlp's own default (slower but more
-  // resilient) client selection if "tv" ever stops working.
-  try {
-    return await resolveStreamUrl(videoId, "tv");
-  } catch (err) {
-    console.error(`[ytdlp] "tv" client failed for ${videoId}, falling back to default client selection:`, err);
-    return resolveStreamUrl(videoId, null);
+  // As of ~Aug 2026 YouTube scores requests on IP reputation + a
+  // BotGuard-minted Proof-of-Origin token, not just on having a valid
+  // cookie - datacenter IPs (which is what every Vercel Function/Sandbox
+  // is) get bot-walled even with fresh cookies and even with yt-dlp's
+  // default multi-client fallback (confirmed in prod: both "tv" and the
+  // unpinned default failed with the same "Sign in to confirm you're not
+  // a bot" error from this environment, despite freshly re-exported
+  // cookies). "android"/"ios" sometimes sidestep the check where "tv" and
+  // the default set don't, so try those before giving up. This is not a
+  // durable fix - if YouTube closes this gap too, the real fix is a PO
+  // token provider or a residential/mobile proxy, not another client name.
+  // Function's maxDuration is 45s (vercel.json) - budget attempts so up to
+  // 4 sequential tries fit with room to spare. The unpinned default gets
+  // the largest share since it queries multiple player APIs internally.
+  const attempts: [string | null, number][] = [
+    ["tv", 8_000],
+    ["android", 8_000],
+    ["ios", 8_000],
+    [null, 15_000],
+  ];
+  let lastErr: unknown;
+  for (const [client, timeoutMs] of attempts) {
+    try {
+      return await resolveStreamUrl(videoId, client, timeoutMs);
+    } catch (err) {
+      lastErr = err;
+      console.error(`[ytdlp] client "${client ?? "default"}" failed for ${videoId}:`, err);
+    }
   }
+  throw lastErr;
 }
