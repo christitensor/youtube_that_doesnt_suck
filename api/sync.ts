@@ -85,10 +85,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Mark videos no longer in the source playlist (removed/cleared by Chris).
-    for (const id of Object.keys(db.videos)) {
-      if (!currentIds.has(id) && db.videos[id].removed_from_source === 0) {
-        db.videos[id] = { ...db.videos[id], removed_from_source: 1 };
+    // Guard against a scrape that came back suspiciously empty (bot-check,
+    // transient network blip, playlist temporarily unreachable) being
+    // mistaken for "Chris cleared the whole playlist" - that would mass-hide
+    // every video in one sync, which actually happened once (Sept 2026,
+    // when YouTube's bot-check started intermittently blocking the flat
+    // playlist scrape itself, not just per-video plays). Only trust a
+    // "removed" verdict when the scrape returned a real playlist.
+    if (items.length > 0) {
+      for (const id of Object.keys(db.videos)) {
+        if (!currentIds.has(id) && db.videos[id].removed_from_source === 0) {
+          db.videos[id] = { ...db.videos[id], removed_from_source: 1 };
+        }
       }
+    } else {
+      console.error("[sync] listPlaylist returned 0 items - skipping removal pass to avoid mass-hiding the queue");
     }
 
     await writeDb(db);
