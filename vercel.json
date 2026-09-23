@@ -6,7 +6,7 @@
   "functions": {
     "api/sync.ts": { "maxDuration": 60, "memory": 2048 },
     "api/videos.ts": { "maxDuration": 15 },
-    "api/videos/[id]/stream-url.ts": { "maxDuration": 45, "memory": 2048 },
+    "api/videos/[id]/stream-url.ts": { "maxDuration": 60, "memory": 2048 },
     "api/videos/[id]/download.ts": { "maxDuration": 30, "memory": 2048 },
     "api/videos/[id]/download-audio.ts": { "maxDuration": 30, "memory": 2048 },
     "api/download-all.ts": { "maxDuration": 45, "memory": 2048 },

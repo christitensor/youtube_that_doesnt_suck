@@ -6,6 +6,16 @@
 import { Sandbox } from "@vercel/sandbox";
 import { CRON_SECRET, publicBaseUrl } from "./env.js";
 import { readCookiesText } from "./cookies.js";
+import { POT_PLUGIN_FILES } from "./potPluginFiles.js";
+
+// Same free, self-hosted PO-token provider as the instant "Play" path (see
+// the comment in lib/ytdlp.ts for why cookies alone stopped being enough).
+// The sandbox has a full shell and plenty of time, so this just downloads
+// the binary and drops the vendored plugin files in via heredocs - no need
+// for the Function's /tmp-caching dance since each sandbox is fresh anyway.
+const POT_PLUGIN_PKG_DIR = "/tmp/yt-dlp-plugins/bgutil-ytdlp-pot-provider/yt_dlp_plugins/extractor";
+const POT_BIN_DOWNLOAD_URL =
+  "https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/bgutil-pot-linux-x86_64";
 
 // The Sandbox uploads the finished file straight to Blob (multipart, from
 // inside the microVM) using this token, then tells /api/ingest it's done.
@@ -39,18 +49,35 @@ function buildScript(kind: JobKind, videoId: string, ingestUrl: string, cookiesT
   // real, ffprobe-verified 1080p60 h264/aac file, no proxy needed.
   const cookiesArg = cookiesText ? `--cookies /tmp/cookies.txt` : "";
   const jsRuntimeArg = `$JS_RUNTIME_ARG`;
+  // Best-effort: if the binary download below fails, this dir still exists
+  // (from potPluginSetup) but yt-dlp just reports the provider unavailable
+  // and falls back to cookies alone - never fatal.
+  const potArg = `--plugin-dirs /tmp/yt-dlp-plugins --extractor-args "youtubepot-bgutilcli:cli_path=/tmp/bgutil-pot"`;
   const ytdlpArgs =
     kind === "video"
       ? // Combined (muxed) progressive formats top out at 360p (itag 18) -
         // higher resolutions only exist as separate video+audio tracks. We
         // ask for the best of each and let ffmpeg mux them (the Sandbox has
         // time and ffmpeg for this, unlike the instant "Play" stream).
-        `-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --merge-output-format mp4 -o "out.%(ext)s" --no-playlist --no-warnings ${jsRuntimeArg} ${cookiesArg}`
-      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${jsRuntimeArg} ${cookiesArg}`;
+        `-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best" --merge-output-format mp4 -o "out.%(ext)s" --no-playlist --no-warnings ${jsRuntimeArg} ${cookiesArg} ${potArg}`
+      : `-x --audio-format mp3 --audio-quality 2 -o "out.%(ext)s" --no-playlist --no-warnings ${jsRuntimeArg} ${cookiesArg} ${potArg}`;
 
   const cookiesSetup = cookiesText
     ? `cat > /tmp/cookies.txt <<'YTDLP_COOKIES_EOF'\n${cookiesText}\nYTDLP_COOKIES_EOF\nchmod 600 /tmp/cookies.txt\n`
     : "";
+
+  // Same free PO-token provider as the instant "Play" path (see
+  // lib/ytdlp.ts) - vendored plugin source written via heredoc, binary
+  // downloaded fresh since each sandbox is a new VM.
+  const potPluginSetup =
+    `mkdir -p '${POT_PLUGIN_PKG_DIR}'\n` +
+    Object.entries(POT_PLUGIN_FILES)
+      .map(([name, contents]) => {
+        const marker = `POT_PLUGIN_${name.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}_EOF`;
+        return `cat > '${POT_PLUGIN_PKG_DIR}/${name}' <<'${marker}'\n${contents}\n${marker}\n`;
+      })
+      .join("") +
+    `curl -sSL -o /tmp/bgutil-pot "${POT_BIN_DOWNLOAD_URL}" && chmod +x /tmp/bgutil-pot || echo "warning: bgutil-pot download failed, continuing on cookies alone"\n`;
 
   // Don't assume which package manager the Sandbox image has (dnf on Amazon
   // Linux, apt-get on Debian/Ubuntu) - try whichever exists. Node is also
@@ -116,6 +143,7 @@ cd /tmp
 curl -sSL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux" || fail "could not download yt-dlp"
 chmod +x /tmp/yt-dlp
 ${cookiesSetup}
+${potPluginSetup}
 ${nodeSetup}
 ${ffmpegSetup}
 command -v node >/dev/null 2>&1 || fail "node is not available in the sandbox"

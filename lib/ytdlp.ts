@@ -6,12 +6,34 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import path from "node:path";
 import { readCookiesText } from "./cookies.js";
+import { POT_PLUGIN_FILES } from "./potPluginFiles.js";
 
 const YTDLP_PATH = "/tmp/yt-dlp";
 const YTDLP_DOWNLOAD_URL =
   "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux";
 const COOKIES_PATH = "/tmp/cookies.txt";
+
+// As of ~Aug 2026 cookies alone stopped being enough to pass YouTube's
+// bot-check from datacenter IPs (which every Vercel Function/Sandbox is) -
+// YouTube also scores a BotGuard-minted Proof-of-Origin token. This is a
+// free, self-hosted token generator (Rust, single static binary, no
+// npm/canvas native-compile risk unlike the original TS implementation):
+// https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs
+// It plugs into yt-dlp as a "script/CLI" PO token provider - yt-dlp shells
+// out to it per request rather than needing an always-on server, which
+// fits a stateless Function. Confirmed locally: the plugin loads and
+// registers correctly (`PO Token Providers: bgutil:cli... (external)`).
+const POT_BIN_PATH = "/tmp/bgutil-pot";
+const POT_BIN_DOWNLOAD_URL =
+  "https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/bgutil-pot-linux-x86_64";
+// Must be nested one level under the plugin-dirs root as
+// <package name>/yt_dlp_plugins/... - yt-dlp's plugin loader requires that
+// exact shape (confirmed locally; a flat yt_dlp_plugins/ at the root is
+// silently ignored, logged as "Plugin directories: none").
+const POT_PLUGIN_DIRS_ROOT = "/tmp/yt-dlp-plugins";
+const POT_PLUGIN_PKG_DIR = path.join(POT_PLUGIN_DIRS_ROOT, "bgutil-ytdlp-pot-provider", "yt_dlp_plugins", "extractor");
 
 let ensurePromise: Promise<void> | null = null;
 
@@ -29,6 +51,45 @@ async function ensureYtDlp(): Promise<void> {
     })();
   }
   await ensurePromise;
+}
+
+let potProviderPromise: Promise<boolean> | null = null;
+
+/** Downloads the bgutil-pot binary and writes the vendored plugin files into
+ * /tmp once per cold start. Returns whether the provider is ready to use.
+ * Failure here should never take down Play/Download - cookies alone still
+ * work for some requests, so this degrades to "no PO token" rather than
+ * throwing. */
+async function ensurePotProvider(): Promise<boolean> {
+  if (fs.existsSync(POT_BIN_PATH) && fs.existsSync(POT_PLUGIN_PKG_DIR)) return true;
+  if (!potProviderPromise) {
+    potProviderPromise = (async () => {
+      try {
+        await fsp.mkdir(POT_PLUGIN_PKG_DIR, { recursive: true });
+        await Promise.all(
+          Object.entries(POT_PLUGIN_FILES).map(([name, contents]) =>
+            fsp.writeFile(path.join(POT_PLUGIN_PKG_DIR, name), contents, { mode: 0o644 })
+          )
+        );
+        const res = await fetch(POT_BIN_DOWNLOAD_URL, { redirect: "follow" });
+        if (!res.ok) throw new Error(`Failed to download bgutil-pot binary: ${res.status}`);
+        const buf = Buffer.from(await res.arrayBuffer());
+        await fsp.writeFile(POT_BIN_PATH, buf, { mode: 0o755 });
+        await fsp.chmod(POT_BIN_PATH, 0o755);
+        return true;
+      } catch (err) {
+        console.error("[ytdlp] PO token provider setup failed, continuing without it:", err);
+        return false;
+      }
+    })();
+  }
+  return potProviderPromise;
+}
+
+async function potArgs(): Promise<string[]> {
+  return (await ensurePotProvider())
+    ? ["--plugin-dirs", POT_PLUGIN_DIRS_ROOT, "--extractor-args", `youtubepot-bgutilcli:cli_path=${POT_BIN_PATH}`]
+    : [];
 }
 
 let cookiesPromise: Promise<boolean> | null = null;
@@ -128,6 +189,7 @@ export async function listPlaylist(playlistId: string): Promise<FlatPlaylistItem
       `%(id)s${SEP}%(title)s${SEP}%(duration)s${SEP}%(channel)s${SEP}%(uploader)s`,
       ...JS_RUNTIME_ARGS,
       ...(await cookieArgs()),
+      ...(await potArgs()),
     ],
     55_000,
     1
@@ -162,6 +224,7 @@ async function resolveStreamUrl(videoId: string, playerClient: string | null, ti
       ...clientArgs,
       ...JS_RUNTIME_ARGS,
       ...(await cookieArgs()),
+      ...(await potArgs()),
     ],
     timeoutMs,
     0
