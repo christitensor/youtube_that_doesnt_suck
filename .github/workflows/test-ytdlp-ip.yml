@@ -9,9 +9,13 @@ jobs:
         run: |
           curl -sSL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"
           chmod +x /tmp/yt-dlp
-      - name: Try a mainstream video with no cookies
+      - name: Sweep player clients on the actual failing video (no cookies)
         run: |
-          /tmp/yt-dlp -v -f "best[ext=mp4]/best" --get-url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" || true
-      - name: Try the actual failing playlist video
-        run: |
-          /tmp/yt-dlp -v -f "best[ext=mp4]/best" --get-url "https://www.youtube.com/watch?v=sZ7uAK85rGU" || true
+          for client in tv android ios mweb web web_safari web_creator web_embedded tv_embedded; do
+            echo "=== client: $client ==="
+            /tmp/yt-dlp -f "best[ext=mp4]/best" --get-url \
+              --extractor-args "youtube:player_client=$client" \
+              --no-warnings \
+              "https://www.youtube.com/watch?v=sZ7uAK85rGU" 2>&1 | tail -5
+            echo
+          done
