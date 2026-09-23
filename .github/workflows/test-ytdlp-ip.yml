@@ -1,0 +1,17 @@
+name: Test yt-dlp IP reputation
+on:
+  workflow_dispatch: {}
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download yt-dlp
+        run: |
+          curl -sSL -o /tmp/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"
+          chmod +x /tmp/yt-dlp
+      - name: Try a mainstream video with no cookies
+        run: |
+          /tmp/yt-dlp -v -f "best[ext=mp4]/best" --get-url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" || true
+      - name: Try the actual failing playlist video
+        run: |
+          /tmp/yt-dlp -v -f "best[ext=mp4]/best" --get-url "https://www.youtube.com/watch?v=sZ7uAK85rGU" || true
