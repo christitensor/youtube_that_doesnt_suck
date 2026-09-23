@@ -33,6 +33,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // Recovery lever for the empty-scrape mass-hide bug above (fixed, but
+  // videos it already hid stay hidden until they'd reappear in a
+  // *successful* scrape) - reusing this endpoint rather than adding a new
+  // one, since the project is already at Vercel Hobby's 12-function cap.
+  // Unauthenticated like the rest of GET /api/sync: it only ever moves
+  // removed_from_source 1 -> 0, never hides or deletes anything.
+  if (req.method === "GET" && req.query.restore === "1") {
+    const db = await readDb();
+    let restored = 0;
+    for (const id of Object.keys(db.videos)) {
+      if (db.videos[id].removed_from_source === 1) {
+        db.videos[id] = { ...db.videos[id], removed_from_source: 0 };
+        restored++;
+      }
+    }
+    await writeDb(db);
+    res.status(200).json({ restored });
+    return;
+  }
+
   try {
     const items = await listPlaylist(WATCH_LATER_PLAYLIST_ID);
     const db = await readDb();
